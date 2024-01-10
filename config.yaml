@@ -3,7 +3,7 @@ baseurl: https://example.com
 languageCode: zh-cn
 theme: hugo-theme-stack
 paginate: 5
-title: Example Site
+title: lightsu's blog
 copyright: Example Person
 
 languages:
@@ -50,7 +50,7 @@ params:
         - post
     featuredImageField: image
     rssFullContent: true
-    favicon:  # e.g.: favicon placed in `static/favicon.ico` of your site folder, then set this field to `/favicon.ico` (`/` is necessary)
+    favicon:  /favicon.ico # e.g.: favicon placed in `static/favicon.ico` of your site folder, then set this field to `/favicon.ico` (`/` is necessary)
 
     footer:
         since: 2020
