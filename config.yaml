@@ -3,8 +3,8 @@ baseurl: https://example.com
 languageCode: zh-cn
 theme: hugo-theme-stack
 paginate: 5
-title: lightsu's blog
-copyright: Example Person
+title: Lightsu's blog
+copyright: Lightsu's blog
 
 languages:
     # en:
