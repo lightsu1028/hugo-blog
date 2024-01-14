@@ -2,7 +2,7 @@ baseurl: https://example.com
 # languageCode: en-us
 languageCode: zh-cn
 theme: hugo-theme-stack
-paginate: 5
+paginate: 10
 title: Lightsu's blog
 copyright: Lightsu's blog
 
