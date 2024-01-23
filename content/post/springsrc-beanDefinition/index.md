@@ -10,7 +10,7 @@ categories = [
     "Spring"
 ]
 image = "bd.jpg"
-draft=false
+draft=true
 +++
 
 主要是介绍Spring framwork中的BeanDefinition模块的源码解析。
@@ -34,7 +34,7 @@ System.out.println(userService);
 * `org.springframework.stereotype.Component @Component`
 * `org.springframework.stereotype.Repository @Repository`
 * `org.springframework.stereotype.Service @Service`
-* `org.springframework.stereotype.Controller @Controller`
+* `org.springframework.stereotype.Con--troller @Controller`
 
 看下相关的构造函数API：
 ```java
@@ -49,10 +49,11 @@ public ClassPathBeanDefinitionScanner(BeanDefinitionRegistry registry, boolean u
     this(registry, useDefaultFilters, getOrCreateEnvironment(registry));
 }
 ```
-扫描器根据指定的包路径比如使用@ComponentScan注解指定，通过资源解析器`ResourcePatternResolver`扫描该路径下的class文件,最终通过元数据读取器`MetadataReader`解析成一个一个的BeanDefinition注册到容器上下文中去，解析时候可以设置相应的规则filter,比如设置哪些class文件不需要解析又有哪些需要。
+扫描器根据指定的包路径比如在@ComponentScan注解中指定，通过资源解析器`ResourcePatternResolver`扫描该路径下的class文件,最终通过元数据读取器`MetadataReader`解析成一个一个的BeanDefinition注册到容器上下文中去，解析时候可以设置相应的规则filter,比如设置哪些class文件不需要解析又有哪些需要。
 
 ### 扫描解析入口方法
-Spring上下文容器在扫描时会调用`org.springframework.context.annotation.ClassPathBeanDefinitionScanner#scan`进行解析指定包路径下面的候选bean定义，具体Spring是在哪调用该方法进入扫描解析流程的后续再详细分析，本篇专注解析逻辑本身。
+Spring上下文容器在扫描时会调用`org.springframework.context.annotation.ClassPathBeanDefinitionScanner#scan`进行解析指定包路径下面的候选
+定义，具体Spring是在哪调用该方法进入扫描解析流程的后续再详细分析，本篇专注解析逻辑本身。
 ```java
 public int scan(String... basePackages) {
     // 获取已经扫描的bean定义个数
@@ -70,5 +71,28 @@ public int scan(String... basePackages) {
 ```
 scan方法中并没有核心的解析逻辑，只是计算了下本次解析的BeanDefinition个数，具体的解析逻辑位于doScan(basePackages)方法中。
 
-### Spring如何注册扫描器
-知道了扫描器具体是干什么的后，Spring是在哪些地方去初始化解析器的呢？
+## ResourceLoader
+```java
+// 读取文件资源
+AnnotationConfigApplicationContext ctx = new AnnotationConfigApplicationContext(AppConfig.class);
+Resource resource = ctx.getResource("file://D:\\githu\\spring-framework-5.3.10\\tuling\\src\\main\\java\\com\\zhouyu\\service\\UserService.java");
+System.out.println(resource.contentLength());
+System.out.println(resource.getFilename());
+
+// 读取网络资源
+Resource resource1 = ctx.getResource("https://www.baidu.com");
+System.out.println(resource1.contentLength());
+System.out.println(resource1.getURL());
+
+// 读取类路径资源
+Resource resource2 = ctx.getResource("classpath:spring.xml");
+System.out.println(resource2.contentLength());
+System.out.println(resource2.getURL());
+```
+Spring中上下文容器AbstractApplicationContext由于继承了`DefaultResourceLoader`，DefaultResourceLoader实现了`ResourceLoader`，所以可以使用容器上下文应对不同的资源路径获取不同的`Resource`。
+而在ClassPathBeanDefinitionScanner内部最终则会使用`org.springframework.core.io.support.PathMatchingResourcePatternResolver#getResources`解析包路径下得到文件资源。
+```java
+
+```
+## ExcludeFilter和IncludeFilter
+
