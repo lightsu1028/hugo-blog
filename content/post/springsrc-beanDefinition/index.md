@@ -10,7 +10,7 @@ categories = [
     "Spring"
 ]
 image = "bd.jpg"
-draft=true
+draft=false
 +++
 
 主要是介绍Spring framwork中的BeanDefinition模块的源码解析。
@@ -75,7 +75,7 @@ scan方法中并没有核心的解析逻辑，只是计算了下本次解析的B
 ```java
 // 读取文件资源
 AnnotationConfigApplicationContext ctx = new AnnotationConfigApplicationContext(AppConfig.class);
-Resource resource = ctx.getResource("file://D:\\githu\\spring-framework-5.3.10\\tuling\\src\\main\\java\\com\\zhouyu\\service\\UserService.java");
+Resource resource = ctx.getResource("file://D:\\githu\\spring-framework-5.3.10\\tuling\\src\\main\\java\\com\\demo\\service\\UserService.java");
 System.out.println(resource.contentLength());
 System.out.println(resource.getFilename());
 
@@ -91,8 +91,30 @@ System.out.println(resource2.getURL());
 ```
 Spring中上下文容器AbstractApplicationContext由于继承了`DefaultResourceLoader`，DefaultResourceLoader实现了`ResourceLoader`，所以可以使用容器上下文应对不同的资源路径获取不同的`Resource`。
 而在ClassPathBeanDefinitionScanner内部最终则会使用`org.springframework.core.io.support.PathMatchingResourcePatternResolver#getResources`解析包路径下得到文件资源。
-```java
 
+![](PathMatchingResourcePatternResolver.png) 
+PathMatchingResourcePatternResolver通过实现ResourcePatternResolver接口最终实现ResourceLoader的能力。
+
+## MetadataReader
+在Spring中需要去解析类的信息，比如类名、类中的方法、类上的注解，这些都可以称之为类的元数据，所以Spring中对类的元数据做了抽象，并提供了一些工具类。
+MetadataReader表示类的元数据读取器，默认实现类为SimpleMetadataReader。比如：
+```java
+SimpleMetadataReaderFactory simpleMetadataReaderFactory = new SimpleMetadataReaderFactory();
+
+// 构造一个MetadataReader
+MetadataReader metadataReader = simpleMetadataReaderFactory.getMetadataReader("com.demo.service.UserService");
+
+// 得到一个ClassMetadata，并获取了类名
+ClassMetadata classMetadata = metadataReader.getClassMetadata();
+System.out.println(classMetadata.getClassName());
+
+// 获取一个AnnotationMetadata，并获取类上的注解信息
+AnnotationMetadata annotationMetadata = metadataReader.getAnnotationMetadata();
+// 类上是否包含@Component注解 可以递归检查
+System.out.println(annotationMetadata.hasMetaAnnotation(Component.class.getName()));
+for (String annotationType : annotationMetadata.getAnnotationTypes()) {
+	System.out.println(annotationType);
+}
 ```
 ## ExcludeFilter和IncludeFilter
 
