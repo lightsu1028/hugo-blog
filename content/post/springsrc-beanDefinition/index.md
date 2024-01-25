@@ -220,3 +220,27 @@ public boolean match(MetadataReader metadataReader, MetadataReaderFactory metada
     return false;
 }
 ```
+#### AnnotationTypeFilter
+```java
+// 目标注解类型
+private final Class<? extends Annotation> annotationType;
+
+protected boolean matchSelf(MetadataReader metadataReader) {
+    // 获取类的元数据
+    AnnotationMetadata metadata = metadataReader.getAnnotationMetadata();
+    // 判断当前类上是否包含目标注解
+    return metadata.hasAnnotation(this.annotationType.getName()) ||
+            (this.considerMetaAnnotations && metadata.hasMetaAnnotation(this.annotationType.getName()));
+}
+```
+`AbstractTypeHierarchyTraversingFilter#matchSelf`方法默认返回false,AnnotationTypeFilter重写了matchSelf方法，使用metadataReader获取当前资源的元数据信息判断是否包含目标注解，metadata.hasMetaAnnotation方法会递归地去解析资源上是否包含目标注解。什么意思呢？比如当前类上使用了@Service注解，metadata.hasMetaAnnotation会检查@Service注解里面是否有@Component注解。
+#### AssignableTypeFilter
+```java
+// 目标类名称
+private final Class<?> targetType;
+// 匹配目标类名称
+protected boolean matchClassName(String className) {
+		return this.targetType.getName().equals(className);
+}
+```
+`org.springframework.core.type.filter.AssignableTypeFilter#matchClassName`方法比较简单，拿目标类名称与当前资源解析器获取的类名称匹配下，targetType就是在@ComponentScan中注定过滤匹配类型。
