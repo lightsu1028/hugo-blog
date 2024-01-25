@@ -9,7 +9,7 @@ tags = [
 categories = [
     "Spring"
 ]
-image = "bd.jpg"
+image = "bd.jpeg"
 draft=false
 +++
 
@@ -233,7 +233,7 @@ protected boolean matchSelf(MetadataReader metadataReader) {
             (this.considerMetaAnnotations && metadata.hasMetaAnnotation(this.annotationType.getName()));
 }
 ```
-`AbstractTypeHierarchyTraversingFilter#matchSelf`方法默认返回false,AnnotationTypeFilter重写了matchSelf方法，使用metadataReader获取当前资源的元数据信息判断是否包含目标注解，metadata.hasMetaAnnotation方法会递归地去解析资源上是否包含目标注解。什么意思呢？比如当前类上使用了@Service注解，metadata.hasMetaAnnotation会检查@Service注解里面是否有@Component注解。
+`AbstractTypeHierarchyTraversingFilter#matchSelf`方法默认返回false,AnnotationTypeFilter重写了matchSelf方法，使用metadataReader获取当前资源的元数据信息判断是否包含目标注解（默认@Component），metadata.hasMetaAnnotation方法会递归地去解析资源上是否包含目标注解。什么意思呢？比如当前类上使用了@Service注解，metadata.hasMetaAnnotation会检查@Service注解里面是否有@Component注解。
 #### AssignableTypeFilter
 ```java
 // 目标类名称
