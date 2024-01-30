@@ -1,5 +1,5 @@
 +++
-title = "Spring源码BeanDefinition解析之ClassPathBeanDefinitionScanner"
+title = "Spring BeanDefinition解析之ClassPathBeanDefinitionScanner"
 date = "2023-01-19"
 description = "Spring BeanDefinition源码解析"
 tags = [
@@ -13,7 +13,7 @@ image = "bd.jpeg"
 draft=false
 +++
 
-主要是介绍Spring framework中在解析BeanDefinition时用到的ClassPathBeanDefinitionScanner以及涉及的一些底层API。
+主要是介绍Spring framework中在解析BeanDefinition模块时用到的ClassPathBeanDefinitionScanner组件以及涉及的一些底层API。
 <!--more-->
 
 ## 前言
@@ -51,25 +51,6 @@ public ClassPathBeanDefinitionScanner(BeanDefinitionRegistry registry, boolean u
 ```
 扫描器根据指定的包路径比如在@ComponentScan注解中指定，通过资源解析器`ResourcePatternResolver`扫描该路径下的class文件,最终通过元数据读取器`MetadataReader`解析成一个一个的BeanDefinition注册到容器上下文中去，解析时候可以设置相应的规则filter,比如设置哪些class文件不需要解析又有哪些需要。
 
-### 扫描解析入口方法
-Spring上下文容器在扫描时会调用`org.springframework.context.annotation.ClassPathBeanDefinitionScanner#scan`进行解析指定包路径下面的候选
-定义，具体Spring是在哪调用该方法进入扫描解析流程的后续再详细分析，本篇专注解析逻辑本身。
-```java
-public int scan(String... basePackages) {
-    // 获取已经扫描的bean定义个数
-    int beanCountAtScanStart = this.registry.getBeanDefinitionCount();
-    // 开始扫描解析
-    doScan(basePackages);
-    
-    // Register annotation config processors, if necessary.
-    if (this.includeAnnotationConfig) {
-        AnnotationConfigUtils.registerAnnotationConfigProcessors(this.registry);
-    }
-    // 计算本次实际扫描解析到的bean定义个数
-    return (this.registry.getBeanDefinitionCount() - beanCountAtScanStart);
-}
-```
-scan方法中并没有核心的解析逻辑，只是计算了下本次解析的BeanDefinition个数，具体的解析逻辑位于doScan(basePackages)方法中。
 
 ## ResourceLoader
 ```java
@@ -244,3 +225,114 @@ protected boolean matchClassName(String className) {
 }
 ```
 `org.springframework.core.type.filter.AssignableTypeFilter#matchClassName`方法比较简单，拿目标类名称与当前资源解析器获取的类名称匹配下，targetType就是在@ComponentScan中注定过滤匹配类型。
+## OrderComparator
+Spring在依赖注入时被依赖的的组件有多个时比如依赖一个List时需要对其进行优先级排序后进行注入,那么有哪些方式可以声明优先级顺序呢？可以实现`org.springframework.core.PriorityOrdered#getOrder`、实现`org.springframework.core.Ordered#getOrder`、或者直接使用`org.springframework.core.annotation.Order`注解指定顺序，那么这些方式的执行顺序又是怎样的呢？
+```java
+// A实现了PriorityOrdered
+public class A implements PriorityOrdered {
+	@Override
+	public int getOrder() {
+		return 0;
+	}
+}
+// B实现了Order接口
+public class B implements Ordered {
+	@Override
+	public int getOrder() {
+		return 0;
+	}
+}
+
+// C通过注解指定
+@Order(0)
+public class C {
+}
+
+A a = new A();
+B b = new B();
+C c = new C();
+AnnotationAwareOrderComparator comparator = new AnnotationAwareOrderComparator();
+
+List list = new ArrayList<>();
+list.add(a);
+list.add(b);
+list.add(c);
+
+list.sort(comparator);
+System.out.println(list);
+```
+A、B、C通过三种不同的方式指定了优先级顺序，执行上述代码最终得到的结果是A->B->C。
+![AnnotationAwareOrderComparator](AnnotationAwareOrderComparator.png) 
+AnnotationAwareOrderComparator比较器的继承图中顶层是java中的Comparator接口，但是AnnotationAwareOrderComparator本身没有实现Comparator，而是在父类`org.springframework.core.OrderComparator`中实现了,看下OrderComparator#compare实现：
+
+```java
+org.springframework.core.OrderComparator#compare
+
+public int compare(@Nullable Object o1, @Nullable Object o2) {
+    return doCompare(o1, o2, null);
+}
+
+private int doCompare(@Nullable Object o1, @Nullable Object o2, @Nullable OrderSourceProvider sourceProvider) {
+    // OrderComparator是升序排序：实现了PriorityOrdered接口最小-->实现了Ordered接口的第二-->没有实现Ordered接口最后，实现了相同接口的按getOrder()返回值进行比较
+
+    // 实现了PriorityOrdered接口 < 没有实现PriorityOrdered接口
+    boolean p1 = (o1 instanceof PriorityOrdered);
+    boolean p2 = (o2 instanceof PriorityOrdered);
+    if (p1 && !p2) {
+        return -1;
+    }
+    else if (p2 && !p1) {
+        return 1;
+    }
+
+    // 都实现了PriorityOrdered接口就使用getOrder()返回的序值进行比较
+    int i1 = getOrder(o1, sourceProvider);
+    int i2 = getOrder(o2, sourceProvider);
+    return Integer.compare(i1, i2);
+}
+```
+doCompare方法的判断逻辑其实挺简单明了的。采用相同方式指定优先级顺序的组件那就看具体的order数值，谁小就谁优先级高；如果组件之间采用了不同的方式指定，那么使用了PriorityOrdered这种方式的实现的组件具有最高优先级。
+* 第11-18行：三种优先级指定方式中，实现了PriorityOrdered接口的组件拥有最高的优先级。
+* 第21-23行：如果都实现了PriorityOrdered接口或者使用了另外两种方式指定则使用getOrder方法返回的优先级判断
+
+
+```java
+org.springframework.core.OrderComparator#getOrder(java.lang.Object)
+
+protected int getOrder(@Nullable Object obj) {
+    if (obj != null) {
+        Integer order = findOrder(obj);
+        if (order != null) {
+            return order;
+        }
+    }
+    return Ordered.LOWEST_PRECEDENCE;
+}
+
+protected Integer findOrder(Object obj) {
+    return (obj instanceof Ordered ? ((Ordered) obj).getOrder() : null);
+}
+```
+在OrderComparator#getOrder中调用了findOrder方法获取优先级顺序。findOrder方法的默认实现是当前组件实现了Ordered接口则直接获取getOrder的值，否则返回空。findOrder使用protected，具体的实现还是在子类AnnotationAwareOrderComparator中：
+```java
+protected Integer findOrder(Object obj) {
+    // 先获取Ordered接口中getOrder()方法返回的数值
+    Integer order = super.findOrder(obj);
+    if (order != null) {
+        return order;
+    }
+    // 如果没有实现Ordered接口，则获取@Order注解中指定的值
+    return findOrderFromAnnotation(obj);
+}
+
+private Integer findOrderFromAnnotation(Object obj) {
+    AnnotatedElement element = (obj instanceof AnnotatedElement ? (AnnotatedElement) obj : obj.getClass());
+    MergedAnnotations annotations = MergedAnnotations.from(element, SearchStrategy.TYPE_HIERARCHY);
+    Integer order = OrderUtils.getOrderFromAnnotations(element, annotations);
+    if (order == null && obj instanceof DecoratingProxy) {
+        return findOrderFromAnnotation(((DecoratingProxy) obj).getDecoratedClass());
+    }
+    return order;
+}
+```
+AnnotationAwareOrderComparator#findOrder调用父类findOrder尝试获取接口上getOrder的值，使用了PriorityOrdered、Ordered方式此处就返回了，如果使用了@Order则进一步通过findOrderFromAnnotation获取注解的优先级值。
