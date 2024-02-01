@@ -186,6 +186,104 @@ protected Set<BeanDefinitionHolder> doScan(String... basePackages) {
 
 ## 解析资源文件生成BeanDefinition
 ```java
+org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider#findCandidateComponents
+
+public Set<BeanDefinition> findCandidateComponents(String basePackage) {
+    if (this.componentsIndex != null && indexSupportsIncludeFilters()) {
+        return addCandidateComponentsFromIndex(this.componentsIndex, basePackage);
+    }
+    else {
+        return scanCandidateComponents(basePackage);
+    }
+}
 ```
+第4-6行：使用索引扫描BeanDefinition
+第8行：通过扫描资源文件即用户的class文件生成BeanDefinition
+
+### 索引扫描
+TODO
+### 扫描候选的BeanDefinition
+```java
+private Set<BeanDefinition> scanCandidateComponents(String basePackage) {
+    Set<BeanDefinition> candidates = new LinkedHashSet<>();
+    try {
+        // 获取basePackage下所有的文件资源
+        String packageSearchPath = ResourcePatternResolver.CLASSPATH_ALL_URL_PREFIX +
+                resolveBasePackage(basePackage) + '/' + this.resourcePattern;
+
+        Resource[] resources = getResourcePatternResolver().getResources(packageSearchPath);
+
+        boolean traceEnabled = logger.isTraceEnabled();
+        boolean debugEnabled = logger.isDebugEnabled();
+        for (Resource resource : resources) {
+            if (traceEnabled) {
+                logger.trace("Scanning " + resource);
+            }
+            if (resource.isReadable()) {
+                try {
+                    MetadataReader metadataReader = getMetadataReaderFactory().getMetadataReader(resource);
+                    // excludeFilters、includeFilters判断
+                    if (isCandidateComponent(metadataReader)) { // @Component-->includeFilters判断
+                        ScannedGenericBeanDefinition sbd = new ScannedGenericBeanDefinition(metadataReader);
+                        sbd.setSource(resource);
+
+                        if (isCandidateComponent(sbd)) {
+                            if (debugEnabled) {
+                                logger.debug("Identified candidate component class: " + resource);
+                            }
+                            candidates.add(sbd);
+                        }
+                        else {
+                            if (debugEnabled) {
+                                logger.debug("Ignored because not a concrete top-level class: " + resource);
+                            }
+                        }
+                    }
+                    else {
+                        if (traceEnabled) {
+                            logger.trace("Ignored because not matching any filter: " + resource);
+                        }
+                    }
+                }
+                catch (Throwable ex) {
+                    throw new BeanDefinitionStoreException(
+                            "Failed to read candidate component class: " + resource, ex);
+                }
+            }
+            else {
+                if (traceEnabled) {
+                    logger.trace("Ignored because not readable: " + resource);
+                }
+            }
+        }
+    }
+    catch (IOException ex) {
+        throw new BeanDefinitionStoreException("I/O failure during classpath scanning", ex);
+    }
+    return candidates;
+}
+```
+第5-8行：拼接类路径地址，最终得到classpath*:xxx/**/*.class这样的一个类似通配符的地址，xxx是你传入的包名，可以通过@ComponentScan注解指定。得到地址后使用`org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider#resourcePatternResolver`进行资源文件解析得到`org.springframework.core.io.Resource`集合。
+第18-35行:从MetadataReaderFactory获取MetadataReader，使用excludeFilters、includeFilters判断扫描到的资源文件是否需要解析成beanDefinition。
+
+第8行最终会调用`org.springframework.core.io.support.PathMatchingResourcePatternResolver#getResources`，但是这里并不是直接使用。扫描器会使用容器上下文AnnotationConfigApplicationContext作为resourcePatternResolver。
+```java
+org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider
+
+// AnnotationConfigApplicationContext
+private ResourcePatternResolver resourcePatternResolver;
+
+private ResourcePatternResolver getResourcePatternResolver() {
+    // 扫描器没有resourcePatternResolver 直接创建PathMatchingResourcePatternResolver
+    if (this.resourcePatternResolver == null) {
+        this.resourcePatternResolver = new PathMatchingResourcePatternResolver();
+    }
+    // 使用AnnotationConfigApplicationContext作为resourcePatternResolver
+    return this.resourcePatternResolver;
+}
+```
+![](AnnotationConfigApplicationContext.png) 
+
+
 ## scope属性解析
 ## beanName生成
