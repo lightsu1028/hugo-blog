@@ -143,3 +143,49 @@ beanDefinition的类型会被设置ROLE_INFRASTRUCTURE表示当前bean的类型�
 真正进行注册beanDefinition则是调用容器的registerBeanDefinition将definition注册到容器的BeanDefinitinoMap中去。
 
 ## 注册用户自定义beanDefinition
+```java
+protected Set<BeanDefinitionHolder> doScan(String... basePackages) {
+    Assert.notEmpty(basePackages, "At least one base package must be specified");
+    Set<BeanDefinitionHolder> beanDefinitions = new LinkedHashSet<>();
+    for (String basePackage : basePackages) {
+
+        Set<BeanDefinition> candidates = findCandidateComponents(basePackage);
+
+        for (BeanDefinition candidate : candidates) {
+            ScopeMetadata scopeMetadata = this.scopeMetadataResolver.resolveScopeMetadata(candidate);
+            candidate.setScope(scopeMetadata.getScopeName());
+
+            String beanName = this.beanNameGenerator.generateBeanName(candidate, this.registry);
+
+            if (candidate instanceof AbstractBeanDefinition) {
+                postProcessBeanDefinition((AbstractBeanDefinition) candidate, beanName);
+            }
+            if (candidate instanceof AnnotatedBeanDefinition) {
+                // 解析@Lazy、@Primary、@DependsOn、@Role、@Description
+                AnnotationConfigUtils.processCommonDefinitionAnnotations((AnnotatedBeanDefinition) candidate);
+            }
+
+            // 检查Spring容器中是否已经存在该beanName
+            if (checkCandidate(beanName, candidate)) {
+                BeanDefinitionHolder definitionHolder = new BeanDefinitionHolder(candidate, beanName);
+                definitionHolder =
+                        AnnotationConfigUtils.applyScopedProxyMode(scopeMetadata, definitionHolder, this.registry);
+                beanDefinitions.add(definitionHolder);
+
+                // 注册
+                registerBeanDefinition(definitionHolder, this.registry);
+            }
+        }
+    }
+    return beanDefinitions;
+}
+```
+第4-6行：扫描basePackage下的资源文件生成BeanDefinition，findCandidateComponents是核心的扫描解析逻辑，下面详细分析。
+第9-10行：解析bean的scope属性
+第12行：调用BeanNameGenerator给bean生成名字
+
+## 解析资源文件生成BeanDefinition
+```java
+```
+## scope属性解析
+## beanName生成
