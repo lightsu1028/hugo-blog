@@ -53,6 +53,7 @@ public ClassPathBeanDefinitionScanner(BeanDefinitionRegistry registry, boolean u
 
 
 ## ResourceLoader
+### Spring中如何读取资源文件
 ```java
 // 读取文件资源
 AnnotationConfigApplicationContext ctx = new AnnotationConfigApplicationContext(AppConfig.class);
@@ -70,8 +71,119 @@ Resource resource2 = ctx.getResource("classpath:spring.xml");
 System.out.println(resource2.contentLength());
 System.out.println(resource2.getURL());
 ```
-Spring中上下文容器AbstractApplicationContext由于继承了`DefaultResourceLoader`，DefaultResourceLoader实现了`ResourceLoader`，所以可以使用容器上下文应对不同的资源路径获取不同的`Resource`。
-而在ClassPathBeanDefinitionScanner内部最终则会使用`org.springframework.core.io.support.PathMatchingResourcePatternResolver#getResources`解析包路径下得到文件资源。
+容器上下文AnnotationConfigApplicationContext会根据不同的schema读取不同类型的资源，读取资源的方法一共有2个，org.springframework.context.support.GenericApplicationContext#getResource和org.springframework.context.support.GenericApplicationContext#getResources,前者读取一个而后者可以读取多个资源。
+
+### 读取单个资源
+![](AnnotationConfigApplicationContext.png) 
+这里截取了AnnotationConfigApplicationContext的资源相关接口的继承图，最顶层的接口`org.springframework.core.io.ResourceLoader`：
+```java
+public interface ResourceLoader {
+
+	/** 类路径前缀: "classpath:". */
+	String CLASSPATH_URL_PREFIX = ResourceUtils.CLASSPATH_URL_PREFIX;
+
+	// 读取单个资源
+	Resource getResource(String location);
+
+	@Nullable
+	ClassLoader getClassLoader();
+}
+```
+ResourceLoader接口定义了读取单个资源的方法getResource。AnnotationConfigApplicationContext并没有覆写getResource方法，继承了父类的GenericApplicationContext#getResource:
+```java
+public Resource getResource(String location) {
+    if (this.resourceLoader != null) {
+        return this.resourceLoader.getResource(location);
+    }
+    return super.getResource(location);
+}
+```
+GenericApplicationContext其实也没有具体实现getResource方法，先判断是否自定义了resourceLoader，如果已经设置了则直接调用resourceLoader.getResource读取资源；如果没有则进一步调用父类DefaultResourceLoader#getResource方法。DefaultResourceLoader才是ResourceLoader接口的具体实现：
+```java
+org.springframework.core.io.DefaultResourceLoader#getResource
+
+public Resource getResource(String location) {
+    Assert.notNull(location, "Location must not be null");
+
+    for (ProtocolResolver protocolResolver : getProtocolResolvers()) {
+        Resource resource = protocolResolver.resolve(location, this);
+        if (resource != null) {
+            return resource;
+        }
+    }
+
+    if (location.startsWith("/")) {
+        return getResourceByPath(location);
+    }
+    else if (location.startsWith(CLASSPATH_URL_PREFIX)) {
+        return new ClassPathResource(location.substring(CLASSPATH_URL_PREFIX.length()), getClassLoader());
+    }
+    else {
+        try {
+            // Try to parse the location as a URL...
+            URL url = new URL(location);
+            return (ResourceUtils.isFileURL(url) ? new FileUrlResource(url) : new UrlResource(url));
+        }
+        catch (MalformedURLException ex) {
+            // No URL -> resolve as resource path.
+            return getResourceByPath(location);
+        }
+    }
+}
+```
+第6-11行：自定义的`org.springframework.core.io.ProtocolResolver`资源协议解析器集合，Spring并没有默认实现，需要用户自己实现接口。当Spring中的默认资源解析器DefaultResourceLoader不满足资源解析条件时，可以自定义资源解析器作为扩展点，优点就是不需要实现ResourceLoader接口或者继承其他ResourceLoader的其他子类，相对灵活一些。
+
+第13-15行：如果资源路径时/开头，直接生成`org.springframework.core.io.DefaultResourceLoader.ClassPathContextResource`类型的资源。
+
+第16-18行：如果资源路径已classpath:开头，直接生成`org.springframework.core.io.ClassPathResource`类型的资源。
+
+第22-23行：生成URL类型的资源`org.springframework.core.io.FileUrlResource`和`org.springframework.core.io.UrlResource`。
+
+
+通过分析单个资源的解析逻辑，Spring主要使用ResourceLoader的默认实现DefaultResourceLoader作为单个资源解析的主要实现，如果不满足默认的解析规则，则可以通过自己实现ResourceLoader接口注入容器上下文或者自定义实现ProtocolResolver注册到DefaultResourceLoader两种方式实现。
+
+### 读取多个资源
+AnnotationConfigApplicationContext的继承图上，ResourcePatternResolver接口继承了ResourceLoader接口，接口定义如下：
+```java
+public interface ResourcePatternResolver extends ResourceLoader {
+
+	String CLASSPATH_ALL_URL_PREFIX = "classpath*:";
+
+	Resource[] getResources(String locationPattern) throws IOException;
+
+}
+```
+ResourcePatternResolver接口扩展了ResourceLoader接口的资源解析能力，它提供了解析多个资源的方法getResources。跟解析单个资源一样，AnnotationConfigApplicationContext并没有重写getResources方法，复用了GenericApplicationContext#getResources方法：
+```java
+public Resource[] getResources(String locationPattern) throws IOException {
+    if (this.resourceLoader instanceof ResourcePatternResolver) {
+        return ((ResourcePatternResolver) this.resourceLoader).getResources(locationPattern);
+    }
+    return super.getResources(locationPattern);
+}
+```
+如果容器自定义了ResourcePatternResolver那就直接使用，如果没有则调用父类`org.springframework.context.support.AbstractApplicationContext#getResources`方法：
+```java
+private ResourcePatternResolver resourcePatternResolver;
+
+public Resource[] getResources(String locationPattern) throws IOException {
+    return this.resourcePatternResolver.getResources(locationPattern);
+}
+```
+AbstractApplicationContext的实现逻辑就是最终调用resourcePatternResolver完成多个资源的解析。那么AbstractApplicationContext是在哪初始化resourcePatternResolver属性的呢？
+```java
+org.springframework.context.support.AbstractApplicationContext
+
+public AbstractApplicationContext() {
+	this.resourcePatternResolver = getResourcePatternResolver();
+}
+
+protected ResourcePatternResolver getResourcePatternResolver() {
+	return new PathMatchingResourcePatternResolver(this);
+}
+```
+AbstractApplicationContext在构造方法中直接创建PathMatchingResourcePatternResolver作为ResourcePatternResolver作为资源解析器使用。
+
 
 ![](PathMatchingResourcePatternResolver.png) 
 PathMatchingResourcePatternResolver通过实现ResourcePatternResolver接口最终实现ResourceLoader的能力。

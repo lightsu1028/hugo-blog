@@ -263,26 +263,11 @@ private Set<BeanDefinition> scanCandidateComponents(String basePackage) {
     return candidates;
 }
 ```
-第5-8行：拼接类路径地址，最终得到classpath*:xxx/**/*.class这样的一个类似通配符的地址，xxx是你传入的包名，可以通过@ComponentScan注解指定。得到地址后使用`org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider#resourcePatternResolver`进行资源文件解析得到`org.springframework.core.io.Resource`集合。
-第18-35行:从MetadataReaderFactory获取MetadataReader，使用excludeFilters、includeFilters判断扫描到的资源文件是否需要解析成beanDefinition。
-
-第8行最终会调用`org.springframework.core.io.support.PathMatchingResourcePatternResolver#getResources`，但是这里并不是直接使用。扫描器会使用容器上下文AnnotationConfigApplicationContext作为resourcePatternResolver。
-```java
-org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider
-
-// AnnotationConfigApplicationContext
-private ResourcePatternResolver resourcePatternResolver;
-
-private ResourcePatternResolver getResourcePatternResolver() {
-    // 扫描器没有resourcePatternResolver 直接创建PathMatchingResourcePatternResolver
-    if (this.resourcePatternResolver == null) {
-        this.resourcePatternResolver = new PathMatchingResourcePatternResolver();
-    }
-    // 使用AnnotationConfigApplicationContext作为resourcePatternResolver
-    return this.resourcePatternResolver;
-}
-```
 ![](AnnotationConfigApplicationContext.png) 
+第5-8行：拼接类路径地址，最终得到classpath*:xxx/**/*.class这样的一个类似通配符的地址，xxx是你传入的包名，可以通过@ComponentScan注解指定。getResourcePatternResolver()会获取ResourcePatternResolver进行多个资源的解析，如果扫描器设置了resourcePatternResolver就直接使用，没有则使用AnnotationConfigApplicationContext最为默认的ResourcePatternResolver进行资源解析。具体的资源解析相关功能可参照[Spring源码BeanDefinition解析之ClassPathBeanDefinitionScanner]({{< relref "springsrc-beanDefinition-ClassPathBeanDefinitionScanner#ResourceLoader" >}})这篇文章相关章节。
+
+第18-35行:从MetadataReaderFactory获取MetadataReader，默认使用CachingMetadataReaderFactory。使用excludeFilters、includeFilters判断扫描到的资源文件是否需要解析成beanDefinition，默认会匹配含有@Component的资源。过滤器的具体使用参考[Spring源码BeanDefinition解析之ClassPathBeanDefinitionScanner]({{< relref "springsrc-beanDefinition-ClassPathBeanDefinitionScanner#ResourceLoader" >}})这篇文章相关章节。
+
 
 
 ## scope属性解析
