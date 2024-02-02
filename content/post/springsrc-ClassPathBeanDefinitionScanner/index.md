@@ -263,10 +263,9 @@ private Set<BeanDefinition> scanCandidateComponents(String basePackage) {
     return candidates;
 }
 ```
-![](AnnotationConfigApplicationContext.png) 
-第5-8行：拼接类路径地址，最终得到classpath*:xxx/**/*.class这样的一个类似通配符的地址，xxx是你传入的包名，可以通过@ComponentScan注解指定。getResourcePatternResolver()会获取ResourcePatternResolver进行多个资源的解析，如果扫描器设置了resourcePatternResolver就直接使用，没有则使用AnnotationConfigApplicationContext最为默认的ResourcePatternResolver进行资源解析。具体的资源解析相关功能可参照[Spring源码BeanDefinition解析之ClassPathBeanDefinitionScanner]({{< relref "springsrc-beanDefinition-ClassPathBeanDefinitionScanner#ResourceLoader" >}})这篇文章相关章节。
+第5-8行：拼接类路径地址，最终得到classpath*:xxx/**/*.class这样的一个类似通配符的地址，xxx是你传入的包名，可以通过@ComponentScan注解指定。getResourcePatternResolver()会获取ResourcePatternResolver进行多个资源的解析，如果扫描器设置了resourcePatternResolver就直接使用，没有则使用AnnotationConfigApplicationContext最为默认的ResourcePatternResolver进行资源解析。具体的资源解析器相关功能可参照[Spring源码BeanDefinition解析之ClassPathBeanDefinitionScanner]({{< relref "springsrc-beanDefinition-ClassPathBeanDefinitionScanner#ResourceLoader" >}})这篇文章相关章节。
 
-第18-35行:从MetadataReaderFactory获取MetadataReader，默认使用CachingMetadataReaderFactory。使用excludeFilters、includeFilters判断扫描到的资源文件是否需要解析成beanDefinition，默认会匹配含有@Component的资源。过滤器的具体使用参考[Spring源码BeanDefinition解析之ClassPathBeanDefinitionScanner]({{< relref "springsrc-beanDefinition-ClassPathBeanDefinitionScanner#ResourceLoader" >}})这篇文章相关章节。
+第18-35行:从MetadataReaderFactory获取MetadataReader，默认使用CachingMetadataReaderFactory，CachingMetadataReaderFactory会使用`Map<Resource, MetadataReader> metadataReaderCache`作为缓存存储Resource跟MetadataReader，Spring默认使用`org.springframework.core.type.classreading.SimpleMetadataReader`。使用excludeFilters、includeFilters判断扫描到的资源文件是否需要解析成beanDefinition，默认会匹配含有@Component的资源。过滤器的具体使用参考[Spring源码BeanDefinition解析之ClassPathBeanDefinitionScanner]({{< relref "springsrc-beanDefinition-ClassPathBeanDefinitionScanner#ResourceLoader" >}})这篇文章相关章节。
 
 
 
