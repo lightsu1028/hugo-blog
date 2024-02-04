@@ -448,3 +448,48 @@ private Integer findOrderFromAnnotation(Object obj) {
 }
 ```
 AnnotationAwareOrderComparator#findOrder调用父类findOrder尝试获取接口上getOrder的值，使用了PriorityOrdered、Ordered方式此处就返回了，如果使用了@Order则进一步通过findOrderFromAnnotation获取注解的优先级值。
+
+## ConditionEvaluator
+ConditionEvaluator条件评估器,Spring中用于根据特定条件确定是否创建bean的机制。在Spring中，通过使用条件注解和条件类，可以使用ConditionEvaluator来决定在运行时是否应该创建某个特定的bean。条件注解即`org.springframework.context.annotation.Conditional`,条件类就是实现了`org.springframework.context.annotation.ConfigurationCondition`的子类。看下这2个接口的定义：
+```java
+org.springframework.context.annotation
+
+@Target({ElementType.TYPE, ElementType.METHOD})
+@Retention(RetentionPolicy.RUNTIME)
+@Documented
+public @interface Conditional {
+
+	Class<? extends Condition>[] value();
+
+}
+
+@FunctionalInterface
+public interface Condition {
+
+	boolean matches(ConditionContext context, AnnotatedTypeMetadata metadata);
+
+}
+```
+条件注解@Conditional的值是Condition类型的条件类数组，可以同时定义多个条件类。条件类需要实现Condition接口的matches方法，当条件类的matches方法返回true时意味着这个条件注解才生效，含有条件注解@Conditional的组件才可以被注册，反之亦然。举个例子：
+```java
+@Configuration
+public class AppConfig {
+
+    @Bean
+    @Conditional(MyCondition.class) // 使用自定义的条件类
+    public MyBean myBean() {
+        return new MyBean();
+    }
+}
+
+public class MyCondition implements Condition {
+
+    @Override
+    public boolean matches(ConditionContext context, AnnotatedTypeMetadata metadata) {
+        // 在这里编写条件的评估逻辑，返回 true 或 false
+        // 例如，可以根据环境属性、系统属性等来确定条件是否满足
+        return true; // 满足条件
+    }
+}
+```
+配置类AppConfig的myBean方法会创建一个MyBean对象，但是myBean方法要生效需要条件类MyCondition的macthes方法返回true才行。那么Spring是如何实现条件机制的呢？答案就是使用ConditionEvaluator#shouldSkip方法完成的。
