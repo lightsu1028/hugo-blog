@@ -180,9 +180,9 @@ protected Set<BeanDefinitionHolder> doScan(String... basePackages) {
     return beanDefinitions;
 }
 ```
-第4-6行：扫描basePackage下的资源文件生成BeanDefinition，findCandidateComponents是核心的扫描解析逻辑，下面详细分析。
-第9-10行：解析bean的scope属性
-第12行：调用BeanNameGenerator给bean生成名字
+* 第4-6行：扫描basePackage下的资源文件生成BeanDefinition，findCandidateComponents找出候选的BeanDefinition是核心的扫描解析逻辑，下面详细分析。
+* 第9-10行：解析bean的scope属性
+* 第12行：调用BeanNameGenerator给bean生成名字
 
 ## 解析资源文件生成BeanDefinition
 ```java
@@ -197,12 +197,13 @@ public Set<BeanDefinition> findCandidateComponents(String basePackage) {
     }
 }
 ```
-第4-6行：使用索引扫描BeanDefinition
-第8行：通过扫描资源文件即用户的class文件生成BeanDefinition
+* 第4-6行：使用索引扫描BeanDefinition
+* 第8行：通过扫描资源文件即用户的class文件生成BeanDefinition
 
 ### 索引扫描
 TODO
-### 扫描候选的BeanDefinition
+### 扫描候选组件
+将资源文件解析成BeanDefinition的功能主要由scanCandidateComponents方法完成。入参basePackage是包路劲，返回值为解析的BeanDefinition集合。源码如下：
 ```java
 private Set<BeanDefinition> scanCandidateComponents(String basePackage) {
     Set<BeanDefinition> candidates = new LinkedHashSet<>();
@@ -263,10 +264,21 @@ private Set<BeanDefinition> scanCandidateComponents(String basePackage) {
     return candidates;
 }
 ```
-第5-8行：拼接类路径地址，最终得到classpath*:xxx/**/*.class这样的一个类似通配符的地址，xxx是你传入的包名，可以通过@ComponentScan注解指定。getResourcePatternResolver()会获取ResourcePatternResolver进行多个资源的解析，如果扫描器设置了resourcePatternResolver就直接使用，没有则使用AnnotationConfigApplicationContext最为默认的ResourcePatternResolver进行资源解析。具体的资源解析器相关功能可参照[Spring源码BeanDefinition解析之ClassPathBeanDefinitionScanner]({{< relref "springsrc-beanDefinition-ClassPathBeanDefinitionScanner#ResourceLoader" >}})这篇文章相关章节。
+* 第5-8行：拼接类路径地址，最终得到classpath*:xxx/**/*.class这样的一个类似通配符的地址，xxx是你传入的包名，可以通过@ComponentScan注解指定。getResourcePatternResolver()会获取ResourcePatternResolver进行多个资源的解析，如果扫描器设置了resourcePatternResolver就直接使用，没有则使用AnnotationConfigApplicationContext最为默认的ResourcePatternResolver进行资源解析。具体的资源解析器相关功能可参照[Spring源码BeanDefinition解析之ClassPathBeanDefinitionScanner]({{< relref "springsrc-beanDefinition-ClassPathBeanDefinitionScanner#ResourceLoader" >}})这篇文章相关章节。
 
-第18-35行:从MetadataReaderFactory获取MetadataReader，默认使用CachingMetadataReaderFactory，CachingMetadataReaderFactory会使用`Map<Resource, MetadataReader> metadataReaderCache`作为缓存存储Resource跟MetadataReader，Spring默认使用`org.springframework.core.type.classreading.SimpleMetadataReader`。使用excludeFilters、includeFilters判断扫描到的资源文件是否需要解析成beanDefinition，默认会匹配含有@Component的资源。过滤器的具体使用参考[Spring源码BeanDefinition解析之ClassPathBeanDefinitionScanner]({{< relref "springsrc-beanDefinition-ClassPathBeanDefinitionScanner#ResourceLoader" >}})这篇文章相关章节。
+* 第18-20行:从MetadataReaderFactory获取MetadataReader，默认使用CachingMetadataReaderFactory，CachingMetadataReaderFactory会使用`Map<Resource, MetadataReader> metadataReaderCache`作为缓存存储Resource跟MetadataReader，Spring默认使用`org.springframework.core.type.classreading.SimpleMetadataReader`。isCandidateComponent方法使用excludeFilters、includeFilters、conditionEvaluator判断扫描到的资源文件是否匹配，includeFilters默认会匹配含有@Component的资源。过滤器和条件注解的具体使用参考[Spring源码BeanDefinition解析之ClassPathBeanDefinitionScanner]({{< relref "springsrc-beanDefinition-ClassPathBeanDefinitionScanner#ResourceLoader" >}})这篇文章相关章节。
 
+* 第21-28行：将上述步骤匹配的资源封装成`org.springframework.context.annotation.ScannedGenericBeanDefinition`，24行又有一个isCandidateComponent方法，会进一步在判断扫描得到的资源是否符合一个候选组件，符合的话最终加到candidates集合中返回出去。看下这个isCandidateComponent的主要逻辑：
+
+```java
+org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider#isCandidateComponent(org.springframework.beans.factory.annotation.AnnotatedBeanDefinition)
+
+protected boolean isCandidateComponent(AnnotatedBeanDefinition beanDefinition) {
+    AnnotationMetadata metadata = beanDefinition.getMetadata();
+    return (metadata.isIndependent() && (metadata.isConcrete() ||
+            (metadata.isAbstract() && metadata.hasAnnotatedMethods(Lookup.class.getName()))));
+}
+```
 
 
 ## scope属性解析

@@ -450,7 +450,8 @@ private Integer findOrderFromAnnotation(Object obj) {
 AnnotationAwareOrderComparator#findOrder调用父类findOrder尝试获取接口上getOrder的值，使用了PriorityOrdered、Ordered方式此处就返回了，如果使用了@Order则进一步通过findOrderFromAnnotation获取注解的优先级值。
 
 ## ConditionEvaluator
-ConditionEvaluator条件评估器,Spring中用于根据特定条件确定是否创建bean的机制。在Spring中，通过使用条件注解和条件类，可以使用ConditionEvaluator来决定在运行时是否应该创建某个特定的bean。条件注解即`org.springframework.context.annotation.Conditional`,条件类就是实现了`org.springframework.context.annotation.ConfigurationCondition`的子类。看下这2个接口的定义：
+### ConditionEvaluator作用
+ConditionEvaluator条件评估器,Spring中用于根据特定条件确定是否创建bean的机制。在Spring中，通过使用条件注解和条件类，可以使用ConditionEvaluator来决定在运行时是否应该创建某个特定的bean。具体在使用的时候就是在候选的类或者方法上使用@Conditional(xxxCondition)条件注解表示bean在特定的条件下生成，涉及到的注解是`org.springframework.context.annotation.Conditional`,xxxCondition条件类就是实现了`org.springframework.context.annotation.ConfigurationCondition`的子类。看下这2个接口的定义：
 ```java
 org.springframework.context.annotation
 
@@ -470,7 +471,7 @@ public interface Condition {
 
 }
 ```
-条件注解@Conditional的值是Condition类型的条件类数组，可以同时定义多个条件类。条件类需要实现Condition接口的matches方法，当条件类的matches方法返回true时意味着这个条件注解才生效，含有条件注解@Conditional的组件才可以被注册，反之亦然。举个例子：
+条件注解@Conditional可作用在类或者方法上，value值是Condition类型的条件类数组，可以同时定义多个条件类。条件类需要实现Condition接口的matches方法，当条件类的matches方法返回true，ConditionEvaluator在评估这些条件注解后才会允许创建bean，反之亦然。举个例子：
 ```java
 @Configuration
 public class AppConfig {
@@ -492,4 +493,87 @@ public class MyCondition implements Condition {
     }
 }
 ```
-配置类AppConfig的myBean方法会创建一个MyBean对象，但是myBean方法要生效需要条件类MyCondition的macthes方法返回true才行。那么Spring是如何实现条件机制的呢？答案就是使用ConditionEvaluator#shouldSkip方法完成的。
+配置类AppConfig的myBean方法会创建一个MyBean对象，但是myBean方法要生效需要条件类MyCondition的macthes方法返回true才行。那么Spring是如何实现条件机制的呢？答案就是通过ConditionEvaluator#shouldSkip方法实现的。
+
+### ConditionEvaluator#shouldSkip
+ConditionEvaluator调用shouldSkip方法判断bean是否需要生成，返回值true代表当前bean应该忽略跳过，false则需要创建bean。入参metadata为含有条件注解的类或方法的元数据信息，可以使用AnnotationMetadata和MethodMetadata的子类诸如SimpleAnnotationMetadata、SimpleMethodMetadata等。另一个参数phase，枚举变量，枚举值有PARSE_CONFIGURATION和REGISTER_BEAN，表示当前条件注解的条件类Condition在什么阶段生效？PARSE_CONFIGURATION为解析配置类时生效，REGISTER_BEAN为注册bean时生效，举个例子：
+```java
+@Configuration
+public class AppConfig {
+
+    @Bean
+    @Conditional(DisableCondition.class) // 使用自定义的条件类
+    public MyBean myBean() {
+        return new MyBean();
+    }
+}
+
+public class DisableCondition implements ConfigurationCondition {
+
+    @Override
+	public ConfigurationPhase getConfigurationPhase() {
+		return ConfigurationPhase.REGISTER_BEAN;
+	}
+
+    @Override
+    public boolean matches(ConditionContext context, AnnotatedTypeMetadata metadata) {
+        // 在这里编写条件的评估逻辑，返回 true 或 false
+        // 例如，可以根据环境属性、系统属性等来确定条件是否满足
+        return false; // 满足条件
+    }
+}
+```
+DisableCondition实现了ConfigurationCondition#getConfigurationPhase方法，matches方法返回false，shouldSkip在评估条件类DisableCondition后会返回true，表示不会向Spring中注册MyBean，但是getConfigurationPhase返回的作用阶段是REGISTER_BEAN，意味着只有在注册普通bean阶段这个条件注解才会生效。如果getConfigurationPhase方法改成返回PARSE_CONFIGURATION，即使matches方法返回的false，shouldSkip在评估条件类DisableCondition后，也不会返回true，因为此时DisableCondition的条件注解的作用阶段是PARSE_CONFIGURATION解析配置类时，而Spring在解析myBean方法时认为是REGISTER_BEAN注册bean阶段，所以Spring会认为DisableCondition无效，最终shouldSkip返回false，容器中还是会注册MyBean。ConditionEvaluator通过ConfigurationPhase对Condition的作用周期提供了更精细地控制。
+
+### 源码解析
+ConditionEvaluator的评估方法有两个，如果不知道ConfigurationPhase应该传什么，可以使用第一个，知道条件注解具体的作用阶段则可以手动指定ConfigurationPhase。shouldSkip方法底层会自动判断当前条件注解的作用阶段是什么。下面具体分析下第二个shouldSkip的源码：
+```java
+// 只指定元数据信息
+public boolean shouldSkip(AnnotatedTypeMetadata metadata) {
+	return shouldSkip(metadata, null);
+}
+
+// 使用元数据信息和具体的作用时期
+public boolean shouldSkip(@Nullable AnnotatedTypeMetadata metadata, @Nullable ConfigurationPhase phase) {
+    if (metadata == null || !metadata.isAnnotated(Conditional.class.getName())) {
+        return false;
+    }
+
+    if (phase == null) {
+        if (metadata instanceof AnnotationMetadata &&
+                ConfigurationClassUtils.isConfigurationCandidate((AnnotationMetadata) metadata)) {
+            return shouldSkip(metadata, ConfigurationPhase.PARSE_CONFIGURATION);
+        }
+        return shouldSkip(metadata, ConfigurationPhase.REGISTER_BEAN);
+    }
+
+    List<Condition> conditions = new ArrayList<>();
+    for (String[] conditionClasses : getConditionClasses(metadata)) {
+        for (String conditionClass : conditionClasses) {
+            Condition condition = getCondition(conditionClass, this.context.getClassLoader());
+            conditions.add(condition);
+        }
+    }
+
+    AnnotationAwareOrderComparator.sort(conditions);
+
+    for (Condition condition : conditions) {
+        ConfigurationPhase requiredPhase = null;
+        if (condition instanceof ConfigurationCondition) {
+            requiredPhase = ((ConfigurationCondition) condition).getConfigurationPhase();
+        }
+        if ((requiredPhase == null || requiredPhase == phase) && !condition.matches(this.context, metadata)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+```
+
+* 第8-10行：候选组件没有使用@Conditional注解的话直接返回false，候选组件则生效生成。
+* 第12-18行：如果phase为空，智能判断当前条件注解作用时期。主要就是通过分析候选组件是否具有配置功能，如果候选组件有配置功能的话就认为当前条件注解作用时期为配置阶段PARSE_CONFIGURATION，否则就是注册普通bean阶段REGISTER_BEAN。详细逻辑下面在分析。
+* 第20-26行：解析@Conditional注解中都有哪些条件注解Condition，用于进一步分析是否需要生成候选组件。
+* 第28-38行：判断是否要生成候选组件。
+  * 如果条件注解没有指定具体的作用阶段，那就看matches方法返回false表示候选组件不生效，否则创建候选组件。
+  * 如果条件注解指定具体的作用阶段，只有当条件注解的实际作用阶段跟期望作用阶段一致，且matches返回false才认为候选组件不生效，其他情况候选组件都生效。
