@@ -577,3 +577,30 @@ public boolean shouldSkip(@Nullable AnnotatedTypeMetadata metadata, @Nullable Co
 * 第28-38行：判断是否要生成候选组件。
   * 如果条件注解没有指定具体的作用阶段，那就看matches方法返回false表示候选组件不生效，否则创建候选组件。
   * 如果条件注解指定具体的作用阶段，只有当条件注解的实际作用阶段跟期望作用阶段一致，且matches返回false才认为候选组件不生效，其他情况候选组件都生效。
+  
+## Lookup注解
+在Spring框架中，@Lookup注解用于告诉Spring容器，每次调用被注解的方法时，都应该返回一个新的实例。通常情况下，Spring会在容器启动时实例化bean，并将其缓存起来供需要时使用。但是对于使用@Lookup注解标记的方法，Spring在运行时会生成一个动态的代理类来处理方法调用，并且会在每次方法调用时动态创建新的实例，而不是使用缓存的实例。
+
+这种动态生成新实例的方式对于一些特定的情况非常有用，比如创建原型（prototype）作用域的bean，并且希望每次注入该bean时都获取一个新的实例。通过在一个方法上添加@Lookup注解，Spring可以提供这样的功能，而无需手动编写复杂的代码来管理实例的创建和生命周期。下面举个例子说明下：
+
+```java
+public abstract class  UserService{
+
+    public void test(){
+		System.out.println(getOrderService());
+	}
+
+	@Lookup("orderService")
+	public OrderService getOrderService(){
+		return null;
+	}
+}
+
+@Component
+@Scope("prototype")
+public class OrderService {
+
+}
+```
+
+UserService是抽象类，抽象类本身是不会被Spring实例化的。但是UserService的getOrderService方法使用了@Lookup注解，这样Spring就会实例化UserService，getOrderService方法每次被调用时都会去容器中寻找orderService的实例，由于orderService是多例，所以每次调用test方法都会返回OrderService的实例对象。

@@ -203,7 +203,7 @@ public Set<BeanDefinition> findCandidateComponents(String basePackage) {
 ### 索引扫描
 TODO
 ### 扫描候选组件
-将资源文件解析成BeanDefinition的功能主要由scanCandidateComponents方法完成。入参basePackage是包路劲，返回值为解析的BeanDefinition集合。源码如下：
+将资源文件解析成BeanDefinition的功能主要由scanCandidateComponents方法完成。入参basePackage是包路径，返回值为解析的BeanDefinition集合。源码如下：
 ```java
 private Set<BeanDefinition> scanCandidateComponents(String basePackage) {
     Set<BeanDefinition> candidates = new LinkedHashSet<>();
@@ -279,7 +279,116 @@ protected boolean isCandidateComponent(AnnotatedBeanDefinition beanDefinition) {
             (metadata.isAbstract() && metadata.hasAnnotatedMethods(Lookup.class.getName()))));
 }
 ```
+这里判断符合候选组件的条件需要同时满足两个条件：
+1. 候选组件是独立的类，如果是嵌套的内部类那必须是静态内部类。
+2. 候选组件是具体的类，即非接口非抽象类；或者是抽象类的话，方法上必须含有Lookup注解。
 
+scanCandidateComponents方法筛选候选组件时为什么要分两个isCandidateComponent方法判断呢而不是写在一个方法里面呢？第一个判断方法主要是进行外部的exclude和include过滤器的筛选，并不进行组件本身的属性条件筛选，第二个判断方法才针对类的自身属性进行具体的条件判断，诸如类的结构、是否为接口或抽象类等条件。***注意这两个判断方法都使用了protected关键字，是可以被子类重写的，如果你有自己的特殊扫描逻辑，可以通过重写这两个判断方法使用你自己的筛选逻辑***。
 
 ## scope属性解析
-## beanName生成
+扫描解析出候选的BeanDefinition后，doScan方法会使用`org.springframework.context.annotation.ScopeMetadataResolver`解析scope相关的属性并设置到BeanDefinition中去。
+```java
+// 解析scope属性元数据信息
+ScopeMetadata scopeMetadata = this.scopeMetadataResolver.resolveScopeMetadata(candidate);
+// 设置BeanDefinition是singleton还是prototype
+candidate.setScope(scopeMetadata.getScopeName());
+```
+这里使用ScopeMetadataResolver的实现`org.springframework.context.annotation.AnnotationScopeMetadataResolver`看下scope的元数据解析是如何实现的：
+```java
+org.springframework.context.annotation.AnnotationScopeMetadataResolver#resolveScopeMetadata
+
+public ScopeMetadata resolveScopeMetadata(BeanDefinition definition) {
+    ScopeMetadata metadata = new ScopeMetadata();
+    if (definition instanceof AnnotatedBeanDefinition) {
+        AnnotatedBeanDefinition annDef = (AnnotatedBeanDefinition) definition;
+        AnnotationAttributes attributes = AnnotationConfigUtils.attributesFor(
+                annDef.getMetadata(), this.scopeAnnotationType);
+        if (attributes != null) {
+            metadata.setScopeName(attributes.getString("value"));
+            ScopedProxyMode proxyMode = attributes.getEnum("proxyMode");
+            if (proxyMode == ScopedProxyMode.DEFAULT) {
+                proxyMode = this.defaultProxyMode;
+            }
+            metadata.setScopedProxyMode(proxyMode);
+        }
+    }
+    return metadata;
+}
+```
+* 第6-8行：获取AnnotatedBeanDefinition的元数据信息AnnotationMetadata，通过注解工具类AnnotationConfigUtils获取Scope属性的元数据信息AnnotationAttributes，AnnotationAttributes实际上是一个LinkedHashMap<String, Object>，key就是注解中的属性名称，value就是注解中的属性值。***所以一个AnnotationAttributes实际就是一个注解的元数据信息集合***。
+
+* 第9-16行：有了Scope属性的元数据信息，提取value值和proxyMode值设置到ScopeMetadata中。Scope注解中的proxyMode值是个枚举值，用于指定在创建代理对象时使用的代理模式，它有三种可能的取值：
+    * proxyMode = ScopedProxyMode.NO：这表示不要使用代理来包装bean，直接返回原始的bean对象，如果不设置proxyMode属性，默认值就是这个。
+    * proxyMode = ScopedProxyMode.INTERFACES：这表示使用JDK动态代理来包装bean，并且只暴露bean实现的接口。
+    * proxyMode = ScopedProxyMode.TARGET_CLASS：这表示使用CGLIB来包装bean，并保留类的结构。
+
+## beanName生成规则
+在doScan方法中，使用`org.springframework.beans.factory.support.BeanNameGenerator#generateBeanName`生成bean的名称，BeanNameGenerator接口有多个实现，这里使用`org.springframework.context.annotation.AnnotationBeanNameGenerator`作为示例参考：
+```java
+org.springframework.context.annotation.AnnotationBeanNameGenerator#generateBeanName
+
+public String generateBeanName(BeanDefinition definition, BeanDefinitionRegistry registry) {
+    if (definition instanceof AnnotatedBeanDefinition) {
+        // 获取注解所指定的beanName
+        String beanName = determineBeanNameFromAnnotation((AnnotatedBeanDefinition) definition);
+        if (StringUtils.hasText(beanName)) {
+            // Explicit bean name found.
+            return beanName;
+        }
+    }
+    // Fallback: generate a unique default bean name.
+    return buildDefaultBeanName(definition, registry);
+}
+```
+* 第2-9行：如果类使用了注解配置，则使用注解方式生成beanName。
+* 第11行：非注解方式定义bean，则使用默认的beanName生成规则。
+
+### 注解方式生成beanName
+```java
+org.springframework.context.annotation.AnnotationBeanNameGenerator#determineBeanNameFromAnnotation
+
+protected String determineBeanNameFromAnnotation(AnnotatedBeanDefinition annotatedDef) {
+    AnnotationMetadata amd = annotatedDef.getMetadata();
+    Set<String> types = amd.getAnnotationTypes();
+    String beanName = null;
+    for (String type : types) {
+        AnnotationAttributes attributes = AnnotationConfigUtils.attributesFor(amd, type);
+        if (attributes != null) {
+            Set<String> metaTypes = this.metaAnnotationTypesCache.computeIfAbsent(type, key -> {
+                Set<String> result = amd.getMetaAnnotationTypes(key);
+                return (result.isEmpty() ? Collections.emptySet() : result);
+            });
+            if (isStereotypeWithNameValue(type, metaTypes, attributes)) {
+                Object value = attributes.get("value");
+                if (value instanceof String) {
+                    String strVal = (String) value;
+                    if (StringUtils.hasLength(strVal)) {
+                        if (beanName != null && !strVal.equals(beanName)) {
+                            throw new IllegalStateException("Stereotype annotations suggest inconsistent " +
+                                    "component names: '" + beanName + "' versus '" + strVal + "'");
+                        }
+                        beanName = strVal;
+                    }
+                }
+            }
+        }
+    }
+    return beanName;
+}
+```
+* 第2-3行：获取类上的注解元数据信息和所有的注解全限定名称
+* 第6-11行：找出这些注解的属性元信息，如果注解是复合注解，比如@Service、@Controller这种那么再找出这些复合注解的元注解信息，isStereotypeWithNameValue根据这些数据判断注解中是否包含Component的信息
+```java
+protected boolean isStereotypeWithNameValue(String annotationType,
+        Set<String> metaAnnotationTypes, @Nullable Map<String, Object> attributes) {
+
+    boolean isStereotype = annotationType.equals(COMPONENT_ANNOTATION_CLASSNAME) ||
+            metaAnnotationTypes.contains(COMPONENT_ANNOTATION_CLASSNAME) ||
+            annotationType.equals("javax.annotation.ManagedBean") ||
+            annotationType.equals("javax.inject.Named");
+
+    return (isStereotype && attributes != null && attributes.containsKey("value"));
+}
+```
+### 默认方式生成beanName
+
