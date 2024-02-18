@@ -344,6 +344,7 @@ public String generateBeanName(BeanDefinition definition, BeanDefinitionRegistry
 * 第11行：非注解方式定义bean，则使用默认的beanName生成规则。
 
 ### 注解方式生成beanName
+如果我们使用了@Component、@Controller、@Service、@Repository这些注解定义bean，并且通过value属性显示定义了beanName,那么Spring通过determineBeanNameFromAnnotation方法解析beanName，具体逻辑如下：
 ```java
 org.springframework.context.annotation.AnnotationBeanNameGenerator#determineBeanNameFromAnnotation
 
@@ -377,12 +378,13 @@ protected String determineBeanNameFromAnnotation(AnnotatedBeanDefinition annotat
 }
 ```
 * 第2-3行：获取类上的注解元数据信息和所有的注解全限定名称
-* 第6-11行：找出这些注解的属性元信息，如果注解是复合注解，比如@Service、@Controller这种那么再找出这些复合注解的元注解信息，isStereotypeWithNameValue根据这些数据判断注解中是否包含Component的信息
+* 第6-11行：找出这些注解的属性元信息，如果注解是复合注解，比如@Service、@Controller这种那么再找出这些复合注解的元注解信息，isStereotypeWithNameValue根据这些数据判断注解中是否包含Component的信息，如果使用了@Service、@Controller、@Component注解并且value属性设置了beanName那么则直接使用。
 ```java
 protected boolean isStereotypeWithNameValue(String annotationType,
         Set<String> metaAnnotationTypes, @Nullable Map<String, Object> attributes) {
-
+    // 当前注解是否直接使用Component
     boolean isStereotype = annotationType.equals(COMPONENT_ANNOTATION_CLASSNAME) ||
+            // 元注解中是否包含Component
             metaAnnotationTypes.contains(COMPONENT_ANNOTATION_CLASSNAME) ||
             annotationType.equals("javax.annotation.ManagedBean") ||
             annotationType.equals("javax.inject.Named");
@@ -391,4 +393,33 @@ protected boolean isStereotypeWithNameValue(String annotationType,
 }
 ```
 ### 默认方式生成beanName
+如果没有使用注解方式定义bean或者使用了注解（@Component、@Controller、@Service、@Repository）但是没有在value属性中显示指定beanName，那么会走默认生成beanName的逻辑，源码位于`org.springframework.context.annotation.AnnotationBeanNameGenerator#buildDefaultBeanName(org.springframework.beans.factory.config.BeanDefinition)`：
+```java
+protected String buildDefaultBeanName(BeanDefinition definition) {
+    String beanClassName = definition.getBeanClassName();
+    Assert.state(beanClassName != null, "No bean class name set");
+    String shortClassName = ClassUtils.getShortName(beanClassName);
+    return Introspector.decapitalize(shortClassName);
+}
+```
+* 第2-4行：获取类的名称，没有全限定名
+* 第5行：真正生成beanName的方法位于`java.beans.Introspector#decapitalize`
+```java
+java.beans.Introspector#decapitalize
 
+public static String decapitalize(String name) {
+    if (name == null || name.length() == 0) {
+        return name;
+    }
+    // 第一和第二个字母都是大写
+    if (name.length() > 1 && Character.isUpperCase(name.charAt(1)) &&
+                    Character.isUpperCase(name.charAt(0))){
+        return name;
+    }
+    // 首字母小写
+    char chars[] = name.toCharArray();
+    chars[0] = Character.toLowerCase(chars[0]);
+    return new String(chars);
+}
+```
+如果是驼峰的命名方式，会把首字母转小写，比如FooBah变成fooBah，X变成x;如果首字母跟第二个字母都是大写这种，则返回原名称不会转换，比如URL还是保持URL不会转换。    
