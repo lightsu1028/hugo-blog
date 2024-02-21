@@ -423,3 +423,91 @@ public static String decapitalize(String name) {
 }
 ```
 如果是驼峰的命名方式，会把首字母转小写，比如FooBah变成fooBah，X变成x;如果首字母跟第二个字母都是大写这种，则返回原名称不会转换，比如URL还是保持URL不会转换。    
+
+## beanDefinition后置处理
+在完成beanName的生成后，扫描器会进行beanDefinition的后置处理，主要是进行一些一些属性的默认赋值和一些通用注解的解析赋值，如@Lazy、@Primary、@DependsOn、@Role、@Description。
+### 属性默认赋值
+doScan方法会判断当前候选组件的BeanDefinition是否为AbstractBeanDefinition，是则进行属性的默认赋值。AbstractBeanDefinition的子类有很多，RootBeanDefinition、ChildBeanDefinition、ScannedGenericBeanDefinition、AnnotatedGenericBeanDefinition这些都是。扫描器刚通过scanCandidateComponents扫出来的候选组件都是ScannedGenericBeanDefinition，所以默认会走postProcessBeanDefinition进行属性赋值。
+```java
+org.springframework.context.annotation.ClassPathBeanDefinitionScanner
+
+// 如果候选组件为AbstractBeanDefinition进行属性默认值赋值
+if (candidate instanceof AbstractBeanDefinition) {
+    postProcessBeanDefinition((AbstractBeanDefinition) candidate, beanName);
+}
+
+// ClassPathBeanDefinitionScanner创建时默认会初始化beanDefinitionDefaults
+private BeanDefinitionDefaults beanDefinitionDefaults = new BeanDefinitionDefaults();
+
+protected void postProcessBeanDefinition(AbstractBeanDefinition beanDefinition, String beanName) {
+    // 设置BeanDefinition的默认值
+    beanDefinition.applyDefaults(this.beanDefinitionDefaults);
+
+    // AutowireCandidate表示某个Bean能否被用来做依赖注入
+    if (this.autowireCandidatePatterns != null) {
+        beanDefinition.setAutowireCandidate(PatternMatchUtils.simpleMatch(this.autowireCandidatePatterns, beanName));
+    }
+}
+```
+* 第13行：主要就是对BeanDefinition的部分属性进行统一默认赋值，通过将ClassPathBeanDefinitionScanner的属性beanDefinitionDefaults对象中的属性赋值到候选的beanDefinition中去,ClassPathBeanDefinitionScanner创建时默认会初始化beanDefinitionDefaults，也可显示调用ClassPathBeanDefinitionScanner的setBeanDefinitionDefaults进行设置。默认都有哪些属性值呢？
+```java
+org.springframework.beans.factory.support.AbstractBeanDefinition#applyDefaults
+
+public void applyDefaults(BeanDefinitionDefaults defaults) {
+    // 设置lazyInit属性
+    Boolean lazyInit = defaults.getLazyInit();
+    if (lazyInit != null) {
+        setLazyInit(lazyInit);
+    }
+    // 设置autowireMode属性 默认为AUTOWIRE_NO
+    setAutowireMode(defaults.getAutowireMode());
+    // 设置dependencyCheck属性，默认DEPENDENCY_CHECK_NONE
+    setDependencyCheck(defaults.getDependencyCheck());
+    // 设置bean初始化时的hook方法
+    setInitMethodName(defaults.getInitMethodName());
+    // 设置enforceInitMethod属性默认true
+    setEnforceInitMethod(false);
+    // 设置bean销毁时的hook方法
+    setDestroyMethodName(defaults.getDestroyMethodName());
+    // 设置enforceDestroyMethod属性 默认true
+    setEnforceDestroyMethod(false);
+}
+```
+* 第16~18行：设置autowireCandidate属性，autowireCandidate属性是用来设置自动装配候选模式的，表示当前bean是否可以被其他bean自动装配，默认为true。autowireCandidatePatterns属性是一组类似正则的匹配规则，允许你指定一组模式，用于匹配bean的名称，以确定哪些bean应该被视为自动装配的候选bean。比如autowireCandidatePatterns设置为[*Service],那些名称以Service结尾的bean会被考虑为自动装配的候选项，如果当前bean是userService，autowireCandidate属性会被设置成true。simpleMatch方法还能匹配其他诸如"xxx*", "*xxx*","xxx*yyy"的模式。
+
+### AnnotatedBeanDefinition注解解析
+扫描器扫描解析出的候选组件为AnnotatedBeanDefinition类型，会进行@Lazy、@Primary、@DependsOn、@Role、@Description属性的值解析，代码比较简单：
+```java
+static void processCommonDefinitionAnnotations(AnnotatedBeanDefinition abd, AnnotatedTypeMetadata metadata) {
+    // 解析Lazy注解
+    AnnotationAttributes lazy = attributesFor(metadata, Lazy.class);
+    if (lazy != null) {
+        abd.setLazyInit(lazy.getBoolean("value"));
+    }
+    else if (abd.getMetadata() != metadata) {
+        lazy = attributesFor(abd.getMetadata(), Lazy.class);
+        if (lazy != null) {
+            abd.setLazyInit(lazy.getBoolean("value"));
+        }
+    }
+    // 解析Primary
+    if (metadata.isAnnotated(Primary.class.getName())) {
+        abd.setPrimary(true);
+    }
+    // 解析DependsOn
+    AnnotationAttributes dependsOn = attributesFor(metadata, DependsOn.class);
+    if (dependsOn != null) {
+        abd.setDependsOn(dependsOn.getStringArray("value"));
+    }
+    // 解析Role
+    AnnotationAttributes role = attributesFor(metadata, Role.class);
+    if (role != null) {
+        abd.setRole(role.getNumber("value").intValue());
+    }
+    // 解析Description
+    AnnotationAttributes description = attributesFor(metadata, Description.class);
+    if (description != null) {
+        abd.setDescription(description.getString("value"));
+    }
+}
+```
