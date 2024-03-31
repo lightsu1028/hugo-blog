@@ -511,3 +511,255 @@ static void processCommonDefinitionAnnotations(AnnotatedBeanDefinition abd, Anno
     }
 }
 ```
+## 注册beanDefinition
+&ensp;&ensp;&ensp;&ensp;在完成了上面的资源文件扫描解析、属性初始化赋值解析、beanName生成等步骤后，扫描器才开始进行真正的beanDefinition注册。在开始之前，Spring首先会根据beanName检测容器中是否已经注册过了相应的bean，没有就进行注册，如果检测到容器中已经有了呢，对于名称冲突的bean该具体如何处理呢？ClassPathBeanDefinitionScanner#checkCandidate方法中给出了具体的答案：
+```java
+protected boolean checkCandidate(String beanName, BeanDefinition beanDefinition) throws IllegalStateException {
+    // 容器中没有当前beanName，返回true，后续开始真正的注册beanDefinition步骤
+    if (!this.registry.containsBeanDefinition(beanName)) {
+        return true;
+    }
+    // 获取容器中已经存在的冲突的BeanDefinition
+    BeanDefinition existingDef = this.registry.getBeanDefinition(beanName);
+    BeanDefinition originatingDef = existingDef.getOriginatingBeanDefinition();
+    if (originatingDef != null) {
+        existingDef = originatingDef;
+    }
+    // 是否兼容，如果兼容返回false表示不会重新注册到Spring容器中，如果不冲突则会抛异常。
+    if (isCompatible(beanDefinition, existingDef)) {
+        return false;
+    }
+    throw new ConflictingBeanDefinitionException("Annotation-specified bean name '" + beanName +
+            "' for bean class [" + beanDefinition.getBeanClassName() + "] conflicts with existing, " +
+            "non-compatible bean definition of same name and class [" + existingDef.getBeanClassName() + "]");
+}
+```
+&ensp;&ensp;&ensp;&ensp;checkCandidate方法中，通过beanName查看容器中是否已经存在注册过了的beanDefinition，没有注册就对外返回false，后续进行真正的beanDefinition步骤实现。  
+&ensp;&ensp;&ensp;&ensp;如果检测到已经存在相同beanName的冲突的bean，isCompatible方法进行兼容判断，不兼容，Spring就抛出ConflictingBeanDefinitionException运行时异常中断Spring的启动，告诉用户具体的冲突bean的类名称进行检查处理。  
+&ensp;&ensp;&ensp;&ensp;如果需要兼容，checkCandidate方法返回false,使用新的beanDefinition注册以覆盖先前注册过的beanDefinition。
+### 兼容判断冲突的bean
+```java
+protected boolean isCompatible(BeanDefinition newDefinition, BeanDefinition existingDefinition) {
+    return (!(existingDefinition instanceof ScannedGenericBeanDefinition) ||  // explicitly registered overriding bean
+            (newDefinition.getSource() != null && newDefinition.getSource().equals(existingDefinition.getSource())) ||  // scanned same file twice
+            newDefinition.equals(existingDefinition));  // scanned equivalent class twice
+}
+```
+&ensp;&ensp;&ensp;&ensp;isCompatible方法主要通过三个条件判断是否兼容,任意满足其中一个就进行兼容。
+* !(existingDefinition instanceof ScannedGenericBeanDefinition)：现有的bean定义不是沟通过扫描机制得到的,比如手动注册的,那么第二次注册时就进行兼容,使用扫描得到的beanDefinition覆盖。Spring会保证扫描的bean定义优先级高于手动的。
+* newDefinition.getSource() != null && newDefinition.getSource().equals(existingDefinition.getSource())：两次扫描的资源文件是一样的第二次覆盖第一次
+* newDefinition.equals(existingDefinition)：扫描了bean Class两次。
+### BeanDefinitionHolder注册
+经过兼容判断后,确实需要进行注册bean定义则执行如下逻辑：
+```java
+    // 创建BeanDefinitionHolder
+    BeanDefinitionHolder definitionHolder = new BeanDefinitionHolder(candidate, beanName);
+    definitionHolder =
+            AnnotationConfigUtils.applyScopedProxyMode(scopeMetadata, definitionHolder, this.registry);
+    beanDefinitions.add(definitionHolder);
+
+    // 注册
+    registerBeanDefinition(definitionHolder, this.registry);
+```
+* 第2行：使用扫描得到的BeanDefinition和beanName创建BeanDefinitionHolder。BeanDefinitionHolder具体是什么呢？
+* 第3~4行：如果bean指定了@Scope中的proxyMode属性为ScopedProxyMode.INTERFACES或ScopedProxyMode.TARGET_CLASS,需要对BeanDefinition做一些特殊处理设置。
+* 第5行：加入扫描的bean定义集合Set中去对外返回
+* 第8行：使用definitionHolder进行真正的注册bean定义。
+#### BeanDefinitionHolder
+Spring对bean定义既然已经定义了父接口`BeanDefinition`,为啥不直接使用BeanDefinition进行注册呢,还要再wrap一个BeanDefinitionHolder进行注册呢？
+
+```java
+public class BeanDefinitionHolder implements BeanMetadataElement {
+
+	private final BeanDefinition beanDefinition;
+
+	private final String beanName;
+
+	@Nullable
+	private final String[] aliases;
+
+    ...
+}
+```
+看下BeanDefinitionHolder的属性其实是对BeanDefinition的wrap,它持有BeanDefinition和beanName,而且多了一个别名的属性,允许bean拥有多个别名。
+
+
+#### BeanDefinitionRegistry注册bean定义
+&ensp;&ensp;&ensp;&ensp;解析器中最终实现的注册的组件就是通过`BeanDefinitionRegistry#registerBeanDefinition`完成的,这就是bean定义的容器。看下BeanDefinitionRegistry接口的定义：
+```java
+public interface BeanDefinitionRegistry extends AliasRegistry {
+
+	// 使用beanName和beanDefinition进行注册
+	void registerBeanDefinition(String beanName, BeanDefinition beanDefinition)
+			throws BeanDefinitionStoreException;
+
+	// 删除指定beanName的bean定义
+	void removeBeanDefinition(String beanName) throws NoSuchBeanDefinitionException;
+
+    // 获取指定beanName的bean定义
+	BeanDefinition getBeanDefinition(String beanName) throws NoSuchBeanDefinitionException;
+
+	// 检查是否包含指定的bean定义
+	boolean containsBeanDefinition(String beanName);
+
+	// 返回所有注册bean定义的beanName
+	String[] getBeanDefinitionNames();
+
+	// 返回注册bean定义个数
+	int getBeanDefinitionCount();
+
+	// beanName是否被使用了
+	boolean isBeanNameInUse(String beanName);
+}
+
+public interface AliasRegistry {
+
+	// 使用beanName和alias注册
+	void registerAlias(String name, String alias);
+
+	// 删除指定别名的bean
+	void removeAlias(String alias);
+
+	// 给定的beanName是否是别名
+	boolean isAlias(String name);
+
+	// 获取beanName的别名
+	String[] getAliases(String name);
+
+}
+```
+&ensp;&ensp;&ensp;&ensp;BeanDefinitionRegistry继承了父接口AliasRegistry,这两个接口据中定义了使用beanName、alias进行bean的增删查等一系列方法。
+Spring中的具体实现有哪些呢？
+![BeanDefinitionRegistry](BeanDefinitionRegistry.png) 
+&ensp;&ensp;&ensp;&ensp;大部分的高级容器都实现了这两个接口,那么注册到扫描器中的BeanDefinitionRegistry具体实现又是什么呢？
+```java
+public AnnotationConfigApplicationContext() {
+    StartupStep createAnnotatedBeanDefReader = this.getApplicationStartup().start("spring.context.annotated-bean-reader.create");
+    // 额外会创建StandardEnvironment
+    this.reader = new AnnotatedBeanDefinitionReader(this);
+    createAnnotatedBeanDefReader.end();
+    // 将AnnotationConfigApplicationContext上下文作为bean定义容器
+    this.scanner = new ClassPathBeanDefinitionScanner(this);
+}
+
+// ClassPathBeanDefinitionScanner扫描器构造函数
+public ClassPathBeanDefinitionScanner(BeanDefinitionRegistry registry, boolean useDefaultFilters,
+			Environment environment, @Nullable ResourceLoader resourceLoader) {
+
+    Assert.notNull(registry, "BeanDefinitionRegistry must not be null");
+    // 构造函数传入bean定义容器
+    this.registry = registry;
+
+    if (useDefaultFilters) {
+        registerDefaultFilters();
+    }
+    setEnvironment(environment);
+    setResourceLoader(resourceLoader);
+}
+```
+&ensp;&ensp;&ensp;&ensp;Spring在初始化上下文时将自身AnnotationConfigApplicationContext作为registry设置到了扫描器中去。   
+既然弄清楚了registry的具体实现,在回到doScan方法中看具体的注册实现源码：
+
+```java
+org.springframework.context.annotation.ClassPathBeanDefinitionScanner#doScan
+
+protected Set<BeanDefinitionHolder> doScan(String... basePackages){
+    if (checkCandidate(beanName, candidate)){
+        // 注册bean定义
+        registerBeanDefinition(definitionHolder, this.registry);
+    }
+}
+
+protected void registerBeanDefinition(BeanDefinitionHolder definitionHolder, BeanDefinitionRegistry registry) {
+    BeanDefinitionReaderUtils.registerBeanDefinition(definitionHolder, registry);
+}
+
+org.springframework.beans.factory.support.BeanDefinitionReaderUtils#registerBeanDefinition
+
+public static void registerBeanDefinition(
+        BeanDefinitionHolder definitionHolder, BeanDefinitionRegistry registry)
+        throws BeanDefinitionStoreException {
+
+    // 使用beanName注册
+    String beanName = definitionHolder.getBeanName();
+    registry.registerBeanDefinition(beanName, definitionHolder.getBeanDefinition());
+
+    // 如果存在别名使用别名注册
+    String[] aliases = definitionHolder.getAliases();
+    if (aliases != null) {
+        for (String alias : aliases) {
+            registry.registerAlias(beanName, alias);
+        }
+    }
+}
+```
+* 第8~9行：使用beanName和beanDefinition注册到registry中去。
+* 第12~17行：如果bean存在别名,则将beanName和别名也注册到registry中。    
+&ensp;&ensp;&ensp;&ensp;知道了registry的真正实现是AnnotationConfigApplicationContext,那么看下registerBeanDefinition的具体实现：
+```java
+org.springframework.context.support.GenericApplicationContext#registerBeanDefinition
+
+private final DefaultListableBeanFactory beanFactory;
+
+public void registerBeanDefinition(String beanName, BeanDefinition beanDefinition)
+			throws BeanDefinitionStoreException {
+    // 具体注册委托给了DefaultListableBeanFactory
+	this.beanFactory.registerBeanDefinition(beanName, beanDefinition);
+}
+```
+AnnotationConfigApplicationContext并没有直接实现BeanDefinitionRegistry#registerBeanDefinition方法,而是继承了父类GenericApplicationContext#registerBeanDefinition,在GenericApplicationContext#registerBeanDefinition真正的实现逻辑委托给了低级容器DefaultListableBeanFactory进行实现。
+#### DefaultListableBeanFactory注册bean定义
+ 
+```java
+// key为beanName value为BeanDefinition
+private final Map<String, BeanDefinition> beanDefinitionMap = new ConcurrentHashMap<>(256);
+
+private volatile List<String> beanDefinitionNames = new ArrayList<>(256);
+
+public void registerBeanDefinition(String beanName, BeanDefinition beanDefinition)
+			throws BeanDefinitionStoreException {
+
+    if (beanDefinition instanceof AbstractBeanDefinition) {
+        try {
+            ((AbstractBeanDefinition) beanDefinition).validate();
+        }
+        catch (BeanDefinitionValidationException ex) {
+            throw new BeanDefinitionStoreException(beanDefinition.getResourceDescription(), beanName,
+                    "Validation of bean definition failed", ex);
+        }
+    }
+
+    BeanDefinition existingDefinition = this.beanDefinitionMap.get(beanName);
+    if (existingDefinition != null) {
+        // 默认是允许BeanDefinition覆盖的
+        ...
+        this.beanDefinitionMap.put(beanName, beanDefinition);
+    }
+    else {
+        if (hasBeanCreationStarted()) {
+            // Cannot modify startup-time collection elements anymore (for stable iteration)
+            synchronized (this.beanDefinitionMap) {
+                this.beanDefinitionMap.put(beanName, beanDefinition);
+                List<String> updatedDefinitions = new ArrayList<>(this.beanDefinitionNames.size() + 1);
+                updatedDefinitions.addAll(this.beanDefinitionNames);
+                updatedDefinitions.add(beanName);
+                this.beanDefinitionNames = updatedDefinitions;
+                removeManualSingletonName(beanName);
+            }
+        }
+        else {
+            // Still in startup registration phase
+            this.beanDefinitionMap.put(beanName, beanDefinition);
+            this.beanDefinitionNames.add(beanName);
+            removeManualSingletonName(beanName);
+        }
+      ...
+    }
+    ...
+}
+```
+* 第4~12行：bean定义校验,主要对bean需要重写的方法进行校验和预处理。
+* 第14~19行：beanDefinitionMap中已经注册过了,默认进行覆盖注册
+* 第26~42行：往beanDefinitionMap、beanDefinitionNames添加新的bean
+
+bean定义的注册整个流程的细节还是有点复杂的,这里简化了逻辑,只分析了核心部分代码。注册的核心就是往beanDefinitionMap、beanDefinitionNames新增了新的bean的相关信息。
