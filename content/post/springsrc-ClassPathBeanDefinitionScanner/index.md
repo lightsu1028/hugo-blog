@@ -708,7 +708,7 @@ public void registerBeanDefinition(String beanName, BeanDefinition beanDefinitio
 }
 ```
 AnnotationConfigApplicationContext并没有直接实现BeanDefinitionRegistry#registerBeanDefinition方法,而是继承了父类GenericApplicationContext#registerBeanDefinition,在GenericApplicationContext#registerBeanDefinition真正的实现逻辑委托给了低级容器DefaultListableBeanFactory进行实现。
-#### DefaultListableBeanFactory注册bean定义
+#### DefaultListableBeanFactory使用beanName注册bean定义
  
 ```java
 // key为beanName value为BeanDefinition
@@ -763,3 +763,62 @@ public void registerBeanDefinition(String beanName, BeanDefinition beanDefinitio
 * 第26~42行：往beanDefinitionMap、beanDefinitionNames添加新的bean
 
 bean定义的注册整个流程的细节还是有点复杂的,这里简化了逻辑,只分析了核心部分代码。注册的核心就是往beanDefinitionMap、beanDefinitionNames新增了新的bean的相关信息。
+
+#### DefaultListableBeanFactory使用别名注册bean定义
+```java
+org.springframework.context.support.GenericApplicationContext#registerAlias
+
+private final DefaultListableBeanFactory beanFactory;
+
+public void registerAlias(String beanName, String alias) {
+    // GenericApplicationContext委托beanFactory进行别名注册
+    this.beanFactory.registerAlias(beanName, alias);
+}
+```
+同样的,AnnotationConfigApplicationContext也没有直接实现AliasRegistry#registerAlias,父类GenericApplicationContext实现了AliasRegistry#registerAlias。最终委托给了低级容器DefaultListableBeanFactory进行别名的注册。
+```java
+org.springframework.core.SimpleAliasRegistry#registerAlias
+
+// key为别名 value为beanName
+private final Map<String, String> aliasMap = new ConcurrentHashMap<>(16);
+
+public void registerAlias(String name, String alias) {
+		
+    synchronized (this.aliasMap) {
+        if (alias.equals(name)) {
+            this.aliasMap.remove(alias);
+            if (logger.isDebugEnabled()) {
+                logger.debug("Alias definition '" + alias + "' ignored since it points to same name");
+            }
+        }
+        else {
+            String registeredName = this.aliasMap.get(alias);
+            if (registeredName != null) {
+                if (registeredName.equals(name)) {
+                    // An existing alias - no need to re-register
+                    return;
+                }
+                if (!allowAliasOverriding()) {
+                    throw new IllegalStateException("Cannot define alias '" + alias + "' for name '" +
+                            name + "': It is already registered for name '" + registeredName + "'.");
+                }
+                if (logger.isDebugEnabled()) {
+                    logger.debug("Overriding alias '" + alias + "' definition for registered name '" +
+                            registeredName + "' with new target name '" + name + "'");
+                }
+            }
+            checkForAliasCircle(name, alias);
+            this.aliasMap.put(alias, name);
+            if (logger.isTraceEnabled()) {
+                logger.trace("Alias definition '" + alias + "' registered for name '" + name + "'");
+            }
+        }
+    }
+}
+```
+* 第9~14行：别名和beanName一致,那就忽略不需要记录
+* 第16~30行：已经存在beanName和别名的映射关系了直接返回;如果别名先前映射了其他的beanName是否允许覆盖判断。
+* 第31行：检查beanName和别名是否存在循环引用的关系。
+    * 直接循环引用：比如有个userBean,别名为userAlias,已经存储了userAlias->user的映射关系,此时别名注册时希望记录user->userAlias的映射,这时就会检测到相互引用,Spring抛出IllegalStateException异常
+    * 间接循环引用：比如已经存储了userAlias->user->u1的映射关系,此时希望存储u1->userAlias的引用,也是不允许会抛出异常的
+* 第32行：向aliasMap中写入别名与beanName的映射关系
