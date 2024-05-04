@@ -337,7 +337,7 @@ protected boolean matchClassName(String className) {
 }
 ```
 `org.springframework.core.type.filter.AssignableTypeFilter#matchClassName`方法比较简单，拿目标类名称与当前资源解析器获取的类名称匹配下，targetType就是在@ComponentScan中注定过滤匹配类型。
-## OrderComparator
+## OrderComparator {#OrderComparator}
 Spring在依赖注入时被依赖的的组件有多个时比如依赖一个List时需要对其进行优先级排序后进行注入,那么有哪些方式可以声明优先级顺序呢？可以实现`org.springframework.core.PriorityOrdered#getOrder`、实现`org.springframework.core.Ordered#getOrder`、或者直接使用`org.springframework.core.annotation.Order`注解指定顺序，那么这些方式的执行顺序又是怎样的呢？
 ```java
 // A实现了PriorityOrdered
