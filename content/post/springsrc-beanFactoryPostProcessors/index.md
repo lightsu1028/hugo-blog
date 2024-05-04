@@ -11,7 +11,7 @@ categories = [
     "Spring"
 ]
 image = "bfbakground.png"
-draft=true
+draft=false
 +++
 
 本篇文章主要是介绍Spring在生成BeanDefinition的过程中，涉及到的扩展接口BeanFactoryPostProcessor以及子接口BeanDefinitionRegistryPostProcessor的介绍、作用以及Spring内部的一些既有实现。
