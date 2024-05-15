@@ -140,7 +140,7 @@ public static void main(String[] args) {
 ### @Import
 &ensp;&ensp;&ensp;&ensp;使用@Import可以导入一个或多个bean组件，根据被导入的组件类型又可以细分为如下几种用法。
 #### Configuration
-&ensp;&ensp;&ensp;&ensp;如果被导入的类是一个普通类，Spring就会把它当作是配置类来处理。准确的说被导入的类既不是ImportSelector类型也不是ImportBeanDefinitionRegistrar类型，那么Spring就会把这个被导入的类统一当作是配置类来处理，不管这个导入类实际是普通的类还是一个真正的配置类。
+&ensp;&ensp;&ensp;&ensp;如果被导入的类是一个普通类，Spring就会把它当作是配置类来处理。那什么是普通类呢？准确的说被导入的类没有实现ImportSelector接口也没有实现ImportBeanDefinitionRegistrar接口，那么Spring就会把这个被导入的类统一当作是配置类来处理，不管这个导入类实际是普通的类还是一个真正的配置类。具体看下面的示例：
 ```java
 public class EmployeeService {
     public void say() {
@@ -173,14 +173,16 @@ public static void main(String[] args) {
     OrderService orderService = (OrderService) applicationContext.getBean("orderService");
     orderService.say();
     // 从容器获取EmployeeService实例
+    // EmployeeService在容器中的beanName为全限定名
     EmployeeService employeeService =(EmployeeService) applicationContext.getBean("com.spring.service.EmployeeService");
     employeeService.say();
 }
 ```
-&ensp;&ensp;&ensp;&ensp;EmployeeService和OrderService是两个普通的java类，MyConfig是一个配置类并且在里面声明了Bean方法需要将OrderService注册到容器内，同时我们在AppConfig类上使用@Import注解导入MyConfig和EmployeeService，最终在main方法里都能获取OrderService和EmployeeService的实例对象，注意@Bean方法声明的Bean名称为类的全路径。
+&ensp;&ensp;&ensp;&ensp;EmployeeService和OrderService是两个普通的java类，MyConfig是一个使用了@Configuration声明的配置类，并且在里面声明了Bean方法需要将OrderService注册到容器内。在AppConfig类上使用@Import注解导入MyConfig和EmployeeService，最终在main方法里都能获取OrderService和EmployeeService的实例对象，注意@Bean方法声明的Bean名称为类的全路径。
 
-&ensp;&ensp;&ensp;&ensp;此种配置方式，入口的配置类就是AppConfig，当Spring解析到AppConfig上有@Import注解时，会将MyConfig和EmployeeService包装成ConfigurationClass暂存起来，同时MyConfig对应的ConfigurationClass里面还会有@Bean方法的元数据`MethodMetadata`信息，用于后续注册@Bean声明的方法返回对象。MyConfig类在整个环节中的作用更像是一个中间过渡载体，实际我们最终希望注册的是MyConfig中的@Bean方法声明的返回对象，但是Spring也会注册MyConfig类，因为对于导入的类，不管是普通的类还是带有@Configuration的类Spring都当作配置类来统一处理。
+&ensp;&ensp;&ensp;&ensp;在这种配置场景下，EmployeeService就是一个普通的类，没有继承或实现任何接口和父类，而MyConfig由于使用了@Configuration注解，被我们声明成了一个配置类，目的是要在配置类中进行一些bean的设置。入口的配置类就是AppConfig，当Spring解析到AppConfig上有@Import注解时，会将MyConfig和EmployeeService包装成ConfigurationClass暂存起来，MyConfig对应的ConfigurationClass里面还会存储解析得到的@Bean方法的元数据`MethodMetadata`信息，用于后续注册@Bean声明的方法返回对象。MyConfig类在整个环节中的作用更像是一个中间过渡载体，实际我们最终希望注册的是MyConfig中的@Bean方法声明的返回对象，但是Spring也会注册MyConfig类。对于导入的类，不管是普通的类还是带有@Configuration注解的类Spring在底层都是当作配置类来统一处理，可能你会觉得当解析到EmployeeService时为何不直接把它注册到bean定义工厂中去，还要把它当作一个配置类进一步地解析呢？如果EmployeeService中有@Bean配置的方法呢，那么EmployeeService此时是不是变成了一个配置类呢，虽然没有使用@Configuration显示声明，但是实际上EmployeeService就是一个配置类。
 #### ImportSelector
+
 ##### DeferredImportSelector
 ##### ImportBeanDefinitionRegistrar
 
